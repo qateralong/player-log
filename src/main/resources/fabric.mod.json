@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "playerlog",
+  "version": "${version}",
+  "name": "Player Log",
+  "description": "Server-side logging: container takes/puts by coordinates, joins/leaves with client mods, deaths and kills, with in-game search.",
+  "authors": [
+    "qateralong"
+  ],
+  "license": "All Rights Reserved",
+  "icon": "assets/playerlog/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.qateralong.playerlog.PlayerLog"
+    ]
+  },
+  "mixins": [
+    "playerlog.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
