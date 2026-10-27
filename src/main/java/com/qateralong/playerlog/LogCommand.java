@@ -218,7 +218,7 @@ public final class LogCommand {
     private static int mods(CommandContext<CommandSourceStack> context) {
         String name = StringArgumentType.getString(context, "name");
         CommandSourceStack source = context.getSource();
-        LogStore.search(entry -> entry.type().equals("JOIN") && entry.player().equalsIgnoreCase(name), 3650, 0, 1)
+        LogStore.search(entry -> entry.type().equals("JOIN") && entry.player().equalsIgnoreCase(name) && !entry.data(2).equals("="), 3650, 0, 1)
                 .thenAcceptAsync(list -> {
                     if (list.isEmpty()) {
                         source.sendFailure(Component.literal("Входов " + name + " в журнале нет"));
@@ -338,8 +338,9 @@ public final class LogCommand {
             case "JOIN" -> {
                 String mods = entry.data(2);
                 MutableComponent hover = Component.literal("Клиент: " + entry.data(0) + "\n");
-                hover.append(Component.literal(mods.isEmpty() ? "Список модов неизвестен (нужен Mod Guard)" : "Моды: " + shorten(mods, 1500)));
-                if (!entry.data(3).isEmpty()) {
+                hover.append(Component.literal(mods.equals("=") ? "Моды и ресурспаки те же, что при прошлом входе"
+                        : mods.isEmpty() ? "Список модов неизвестен (нужен Mod Guard)" : "Моды: " + shorten(mods, 1500)));
+                if (!entry.data(3).isEmpty() && !entry.data(3).equals("=")) {
                     hover.append(Component.literal("\nРесурспаки: " + shorten(entry.data(3), 500)));
                 }
                 hover.append(Component.literal("\n\nНажмите — полный список").withStyle(ChatFormatting.GRAY));

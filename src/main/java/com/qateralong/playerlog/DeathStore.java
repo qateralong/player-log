@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -76,7 +77,39 @@ public final class DeathStore {
         }
         Snapshot snapshot = new Snapshot(id, player.getGameProfile().getName(), player.getUUID(), items, player.experienceLevel,
                 player.experienceProgress, false);
-        return write(snapshot, player.registryAccess()) ? id : "";
+        if (!write(snapshot, player.registryAccess())) {
+            return "";
+        }
+        prune(player.getGameProfile().getName());
+        return id;
+    }
+
+    private static void prune(String player) {
+        int limit = PlayerLog.config().maxDeathSnapshotsPerPlayer;
+        if (limit <= 0) {
+            return;
+        }
+        try (Stream<Path> stream = Files.list(DIR)) {
+            List<String> ids = stream.map(path -> path.getFileName().toString())
+                    .filter(name -> name.endsWith(".dat"))
+                    .map(name -> name.substring(0, name.length() - 4))
+                    .filter(id -> valid(id) && owner(id).equals(player))
+                    .sorted()
+                    .toList();
+            for (int i = 0; i < ids.size() - limit; i++) {
+                if (!OPEN.contains(ids.get(i))) {
+                    Files.deleteIfExists(file(ids.get(i)));
+                }
+            }
+        } catch (IOException e) {
+            PlayerLog.LOGGER.warn("Failed to prune death snapshots of {}", player, e);
+        }
+    }
+
+    private static String owner(String id) {
+        String rest = id.substring(16);
+        int dash = rest.indexOf('-');
+        return dash < 0 ? rest : rest.substring(0, dash);
     }
 
     private static boolean write(Snapshot snapshot, HolderLookup.Provider registries) {

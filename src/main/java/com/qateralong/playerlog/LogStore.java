@@ -97,7 +97,11 @@ public final class LogStore {
                 }
                 Files.createDirectories(DIR);
                 writer = Files.newBufferedWriter(DIR.resolve(day + ".tsv"), StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                boolean changed = !writerDay.isEmpty();
                 writerDay = day;
+                if (changed) {
+                    compressOld();
+                }
             }
             writer.write(line);
             writer.newLine();
@@ -114,7 +118,7 @@ public final class LogStore {
             for (Path file : files(days)) {
                 List<String> lines;
                 try {
-                    lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                    lines = read(file);
                 } catch (IOException e) {
                     continue;
                 }
@@ -138,34 +142,83 @@ public final class LogStore {
         }, worker);
     }
 
+    private static List<String> read(Path file) throws IOException {
+        if (!file.getFileName().toString().endsWith(".gz")) {
+            return Files.readAllLines(file, StandardCharsets.UTF_8);
+        }
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(
+                new java.util.zip.GZIPInputStream(Files.newInputStream(file), 65536), StandardCharsets.UTF_8))) {
+            return reader.lines().collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        }
+    }
+
+    private static boolean isLog(String name) {
+        return (name.endsWith(".tsv") || name.endsWith(".tsv.gz")) && name.length() >= 10;
+    }
+
     private static List<Path> files(int days) {
         String oldest = LocalDate.now(zone()).minusDays(Math.max(0, days - 1)).format(DAY);
         try (Stream<Path> stream = Files.list(DIR)) {
-            return stream.filter(path -> path.getFileName().toString().endsWith(".tsv"))
-                    .filter(path -> path.getFileName().toString().compareTo(oldest) >= 0)
-                    .sorted(Collections.reverseOrder())
+            return stream.filter(path -> isLog(path.getFileName().toString()))
+                    .filter(path -> path.getFileName().toString().substring(0, 10).compareTo(oldest) >= 0)
+                    .sorted(java.util.Comparator.comparing((Path path) -> path.getFileName().toString().substring(0, 10)).reversed())
                     .toList();
         } catch (IOException e) {
             return List.of();
         }
     }
 
-    public static void cleanup(int retentionDays) {
-        if (retentionDays <= 0) {
-            return;
+    private static void compressOld() {
+        String keep = LocalDate.now(zone()).minusDays(1).format(DAY);
+        try (Stream<Path> stream = Files.list(DIR)) {
+            for (Path path : stream.toList()) {
+                String name = path.getFileName().toString();
+                if (!name.endsWith(".tsv") || name.length() < 10 || name.substring(0, 10).compareTo(keep) >= 0 || !writerDay.isEmpty() && name.startsWith(writerDay)) {
+                    continue;
+                }
+                Path target = DIR.resolve(name + ".gz");
+                Path tmp = DIR.resolve(name + ".gz.tmp");
+                try (java.io.OutputStream out = new java.util.zip.GZIPOutputStream(Files.newOutputStream(tmp), 65536)) {
+                    Files.copy(path, out);
+                }
+                if (Files.exists(target)) {
+                    try (java.io.OutputStream out = Files.newOutputStream(target, StandardOpenOption.APPEND)) {
+                        Files.copy(tmp, out);
+                    }
+                    Files.delete(tmp);
+                } else {
+                    Files.move(tmp, target);
+                }
+                Files.delete(path);
+            }
+        } catch (IOException e) {
+            PlayerLog.LOGGER.warn("Failed to compress old player logs", e);
         }
+    }
+
+    public static void cleanup(int retentionDays) {
         worker.execute(() -> {
+            if (Files.isDirectory(DIR)) {
+                compressOld();
+            }
+            if (retentionDays <= 0) {
+                return;
+            }
             String oldest = LocalDate.now(zone()).minusDays(retentionDays).format(DAY);
             try (Stream<Path> stream = Files.list(DIR)) {
                 for (Path path : stream.toList()) {
                     String name = path.getFileName().toString();
-                    if (name.endsWith(".tsv") && name.compareTo(oldest) < 0) {
+                    if (isLog(name) && name.substring(0, 10).compareTo(oldest) < 0) {
                         Files.deleteIfExists(path);
                     }
                 }
             } catch (IOException ignored) {
             }
         });
+    }
+
+    static void submit(Runnable task) {
+        worker.execute(task);
     }
 
     public static void shutdown() {

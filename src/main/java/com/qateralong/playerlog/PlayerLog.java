@@ -67,6 +67,7 @@ public class PlayerLog implements ModInitializer {
         public boolean logDeaths = true;
         public boolean logKills = true;
         public boolean saveDeathItems = true;
+        public int maxDeathSnapshotsPerPlayer = 30;
         public boolean logPickups = true;
         public boolean logCommands = true;
         public int commandPermission = 2;
@@ -164,8 +165,20 @@ public class PlayerLog implements ModInitializer {
         List<String> mods = new ArrayList<>();
         List<String> packs = new ArrayList<>();
         clientReport(player.getUUID(), mods, packs);
+        String modText = String.join(", ", mods);
+        String packText = String.join(", ", packs);
+        String count = mods.isEmpty() && packs.isEmpty() ? "-" : String.valueOf(mods.size());
+        if (!mods.isEmpty() || !packs.isEmpty()) {
+            String hash = Integer.toHexString((modText + "|" + packText).hashCode());
+            if (hash.equals(LastMods.get(player.getUUID()))) {
+                modText = "=";
+                packText = "=";
+            } else {
+                LastMods.put(player.getUUID(), hash);
+            }
+        }
         LogStore.write("JOIN", player.getGameProfile().getName(), player.getUUID(), dimension(player), player.blockPosition(),
-                brand, mods.isEmpty() && packs.isEmpty() ? "-" : String.valueOf(mods.size()), String.join(", ", mods), String.join(", ", packs));
+                brand, count, modText, packText);
     }
 
     public static void leave(ServerPlayer player, String reason) {
