@@ -116,6 +116,7 @@ public class PlayerLog implements ModInitializer {
             return InteractionResult.SUCCESS;
         });
         CommandRegistrationCallback.EVENT.register((dispatcher, access, environment) -> LogCommand.register(dispatcher));
+        PanelNet.init();
     }
 
     private static void load() {

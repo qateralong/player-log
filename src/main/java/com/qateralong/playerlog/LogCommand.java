@@ -170,6 +170,37 @@ public final class LogCommand {
         return 1;
     }
 
+    static Predicate<LogStore.Entry> filter(String name, String kind) {
+        if (!name.isEmpty()) {
+            return entry -> switch (kind) {
+                case "containers" -> entry.player().equalsIgnoreCase(name) && (entry.type().equals("CONTAINER") || entry.type().equals("BREAK"));
+                case "joins" -> entry.player().equalsIgnoreCase(name) && (entry.type().equals("JOIN") || entry.type().equals("LEAVE"));
+                case "deaths" -> (entry.type().equals("DEATH") || entry.type().equals("KILL")) && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name));
+                case "kills" -> entry.type().equals("KILL") && entry.player().equalsIgnoreCase(name);
+                case "events" -> entry.type().equals("EVENT") && (entry.player().equalsIgnoreCase(name) || mentions(entry.data(4), name));
+                case "pickups" -> entry.type().equals("PICKUP") && (entry.player().equalsIgnoreCase(name) || entry.data(4).equalsIgnoreCase(name));
+                case "commands" -> entry.type().equals("COMMAND") && entry.player().equalsIgnoreCase(name);
+                case "restores" -> entry.type().equals("RESTORE") && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name));
+                default -> entry.player().equalsIgnoreCase(name) || entry.type().equals("DEATH") && entry.data(1).equalsIgnoreCase(name)
+                        || entry.type().equals("PICKUP") && entry.data(4).equalsIgnoreCase(name)
+                        || entry.type().equals("RESTORE") && entry.data(1).equalsIgnoreCase(name)
+                        || entry.type().equals("KILL") && entry.data(1).equalsIgnoreCase(name)
+                        || entry.type().equals("EVENT") && mentions(entry.data(4), name);
+            };
+        }
+        return entry -> switch (kind) {
+            case "containers" -> entry.type().equals("CONTAINER") || entry.type().equals("BREAK");
+            case "joins" -> entry.type().equals("JOIN") || entry.type().equals("LEAVE");
+            case "deaths" -> entry.type().equals("DEATH") || entry.type().equals("KILL");
+            case "kills" -> entry.type().equals("KILL");
+            case "events" -> entry.type().equals("EVENT");
+            case "pickups" -> entry.type().equals("PICKUP");
+            case "commands" -> entry.type().equals("COMMAND");
+            case "restores" -> entry.type().equals("RESTORE");
+            default -> true;
+        };
+    }
+
     private static boolean mentions(String players, String name) {
         for (String part : players.split("; ")) {
             if (part.regionMatches(true, 0, name + " ", 0, name.length() + 1)) {
@@ -289,7 +320,7 @@ public final class LogCommand {
         return value >= 3600 ? value / 3600 + " ч " + value % 3600 / 60 + " мин" : value / 60 + " мин " + value % 60 + " с";
     }
 
-    private static Component line(LogStore.Entry entry, boolean withPlace) {
+    static Component line(LogStore.Entry entry, boolean withPlace) {
         MutableComponent line = time(entry);
         switch (entry.type()) {
             case "CONTAINER" -> {
