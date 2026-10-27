@@ -30,7 +30,7 @@ import net.minecraft.world.phys.HitResult;
 
 public final class LogCommand {
     private static final int PAGE = 10;
-    private static final List<String> TYPES = List.of("all", "containers", "joins", "deaths", "kills", "events");
+    private static final List<String> TYPES = List.of("all", "containers", "joins", "deaths", "kills", "events", "pickups", "commands", "restores");
     private static final SuggestionProvider<CommandSourceStack> PLAYERS =
             (context, builder) -> SharedSuggestionProvider.suggest(context.getSource().getOnlinePlayerNames(), builder);
 
@@ -92,6 +92,8 @@ public final class LogCommand {
                         .executes(context -> player(context, "deaths", 1))
                         .then(page().executes(context -> player(context, "deaths", page(context))))))
                 .then(Commands.literal("mods").then(name().executes(LogCommand::mods)))
+                .then(Commands.literal("items").then(Commands.argument("id", StringArgumentType.string()).executes(LogCommand::items)))
+                .then(Commands.literal("return").then(Commands.argument("id", StringArgumentType.string()).executes(LogCommand::giveBack)))
                 .then(Commands.literal("events")
                         .executes(context -> events(context, 1))
                         .then(page().executes(context -> events(context, page(context)))))
@@ -143,8 +145,13 @@ public final class LogCommand {
             case "deaths" -> entry.type().equals("DEATH") && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name))
                     || entry.type().equals("KILL") && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name));
             case "kills" -> entry.type().equals("KILL") && entry.player().equalsIgnoreCase(name);
+            case "pickups" -> entry.type().equals("PICKUP") && (entry.player().equalsIgnoreCase(name) || entry.data(4).equalsIgnoreCase(name));
+            case "commands" -> entry.type().equals("COMMAND") && entry.player().equalsIgnoreCase(name);
+            case "restores" -> entry.type().equals("RESTORE") && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name));
             case "events" -> entry.type().equals("EVENT") && (entry.player().equalsIgnoreCase(name) || mentions(entry.data(4), name));
             default -> entry.player().equalsIgnoreCase(name) || entry.type().equals("DEATH") && entry.data(1).equalsIgnoreCase(name)
+                    || entry.type().equals("PICKUP") && entry.data(4).equalsIgnoreCase(name)
+                    || entry.type().equals("RESTORE") && entry.data(1).equalsIgnoreCase(name)
                     || entry.type().equals("KILL") && entry.data(1).equalsIgnoreCase(name)
                     || entry.type().equals("EVENT") && mentions(entry.data(4), name);
         };
@@ -153,6 +160,9 @@ public final class LogCommand {
             case "joins" -> "Входы и выходы: " + name;
             case "deaths" -> "Смерти и убийства: " + name;
             case "kills" -> "Убийства: " + name;
+            case "pickups" -> "Подобранные чужие вещи: " + name;
+            case "commands" -> "Команды: " + name;
+            case "restores" -> "Выдача вещей из снимков: " + name;
             case "events" -> "События рядом с " + name;
             default -> "Журнал: " + name;
         };
@@ -315,7 +325,29 @@ public final class LogCommand {
                     line.append(Component.literal(" · ").withStyle(ChatFormatting.DARK_GRAY)).append(item(entry.data(2), entry.data(3)));
                 }
                 line.append(Component.literal(" · ур. " + entry.data(4)).withStyle(ChatFormatting.GRAY));
+                if (DeathStore.valid(entry.data(5))) {
+                    line.append(deathButtons(entry.data(5)));
+                }
             }
+            case "PICKUP" -> {
+                String kind = switch (entry.data(3)) {
+                    case "own_death" -> " (свои вещи после смерти)";
+                    case "death" -> " из вещей погибшего " + entry.data(4);
+                    default -> " выброшенное " + entry.data(4);
+                };
+                line.append(player(entry.player())).append(Component.literal(" подобрал ").withStyle(ChatFormatting.GOLD))
+                        .append(Component.literal(entry.data(0) + "× ").withStyle(ChatFormatting.WHITE)).append(item(entry.data(1), entry.data(2)))
+                        .append(Component.literal(kind).withStyle(entry.data(3).equals("death") ? ChatFormatting.RED : ChatFormatting.GRAY));
+            }
+            case "COMMAND" -> line.append(player(entry.player())).append(Component.literal(" /" + entry.data(0)).withStyle(style -> style.withColor(ChatFormatting.WHITE)
+                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Нажмите, чтобы скопировать")))
+                    .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/" + entry.data(0)))));
+            case "RESTORE" -> line.append(player(entry.player())).append(Component.literal(entry.data(0).equals("return") ? " вернул " : " забрал из снимка ")
+                            .withStyle(ChatFormatting.LIGHT_PURPLE))
+                    .append(Component.literal(entry.data(3) + " стак. ").withStyle(ChatFormatting.WHITE))
+                    .append(Component.literal(entry.data(0).equals("return") ? "игроку " + entry.data(1) : "смерти " + entry.data(1)).withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal(" [" + entry.data(2) + "]").withStyle(style -> style.withColor(ChatFormatting.DARK_AQUA)
+                            .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/plog items " + entry.data(2)))));
             case "KILL" -> {
                 MutableComponent victim = entry.data(0).equals("minecraft:player") ? player(entry.data(1))
                         : thing(entry.data(0)).withStyle(ChatFormatting.WHITE).append(entry.data(1).isEmpty() ? Component.empty() : Component.literal(" «" + entry.data(1) + "»"));
@@ -342,6 +374,76 @@ public final class LogCommand {
             default -> line.append(Component.literal(entry.type() + " " + entry.player() + " " + String.join(" ", Arrays.asList(entry.data()))));
         }
         return line.append(place(entry));
+    }
+
+    private static Component deathButtons(String id) {
+        MutableComponent hover = Component.literal("Вещи на момент смерти").withStyle(ChatFormatting.GOLD);
+        DeathStore.Snapshot snapshot = PlayerLog.server == null ? null : DeathStore.load(id, PlayerLog.server.registryAccess());
+        int stacks = 0;
+        if (snapshot != null) {
+            stacks = snapshot.stacks();
+            int shown = 0;
+            for (var entry : DeathStore.summary(snapshot).entrySet()) {
+                if (shown++ >= 20) {
+                    hover.append(Component.literal("\n…").withStyle(ChatFormatting.GRAY));
+                    break;
+                }
+                hover.append(Component.literal("\n" + entry.getValue() + "× ").withStyle(ChatFormatting.WHITE)).append(item(entry.getKey(), ""));
+            }
+            hover.append(Component.literal("\nОпыт: " + snapshot.level() + " ур." + (snapshot.xpReturned() ? " (уже возвращён)" : "")).withStyle(ChatFormatting.GRAY));
+        }
+        hover.append(Component.literal("\n\nНажмите — открыть. Забранное из окна удаляется из снимка.").withStyle(ChatFormatting.GRAY));
+        ChatFormatting color = stacks > 0 ? ChatFormatting.AQUA : ChatFormatting.DARK_GRAY;
+        MutableComponent result = Component.literal(" [вещи: " + stacks + "]").withStyle(style -> style.withColor(color)
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, hover))
+                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/plog items " + id)));
+        return result.append(Component.literal(" [вернуть]").withStyle(style -> style.withColor(ChatFormatting.GREEN)
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Отдать игроку всё оставшееся и опыт (игрок должен быть в сети)")))
+                .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/plog return " + id))));
+    }
+
+    private static int items(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        ServerPlayer viewer = context.getSource().getPlayerOrException();
+        String id = StringArgumentType.getString(context, "id");
+        if (DeathStore.busy(id)) {
+            context.getSource().sendFailure(Component.literal("Этот снимок уже открыт кем-то другим"));
+            return 0;
+        }
+        if (!DeathStore.open(viewer, id)) {
+            context.getSource().sendFailure(Component.literal("Снимок " + id + " не найден"));
+            return 0;
+        }
+        return 1;
+    }
+
+    private static int giveBack(CommandContext<CommandSourceStack> context) {
+        String id = StringArgumentType.getString(context, "id");
+        if (DeathStore.busy(id)) {
+            context.getSource().sendFailure(Component.literal("Снимок сейчас открыт, сначала закройте окно"));
+            return 0;
+        }
+        DeathStore.Snapshot snapshot = DeathStore.load(id, context.getSource().registryAccess());
+        if (snapshot == null) {
+            context.getSource().sendFailure(Component.literal("Снимок " + id + " не найден"));
+            return 0;
+        }
+        ServerPlayer target = context.getSource().getServer().getPlayerList().getPlayer(snapshot.uuid());
+        if (target == null) {
+            context.getSource().sendFailure(Component.literal(snapshot.player() + " не в сети"));
+            return 0;
+        }
+        boolean xp = !snapshot.xpReturned() && snapshot.level() > target.experienceLevel;
+        if (snapshot.stacks() == 0 && !xp) {
+            context.getSource().sendFailure(Component.literal("В снимке ничего не осталось"));
+            return 0;
+        }
+        int given = DeathStore.giveBack(target, id);
+        String by = context.getSource().getTextName();
+        LogStore.write("RESTORE", by, context.getSource().getEntity() == null ? new java.util.UUID(0L, 0L) : context.getSource().getEntity().getUUID(),
+                target.level().dimension().location().toString(), target.blockPosition(), "return", snapshot.player(), id, String.valueOf(given));
+        context.getSource().sendSuccess(() -> Component.literal(snapshot.player() + " получил " + given + " стак." + (xp ? " и опыт до " + snapshot.level() + " ур." : "")), true);
+        target.sendSystemMessage(Component.literal("Вам вернули вещи, бывшие при смерти").withStyle(ChatFormatting.GREEN));
+        return given;
     }
 
     private static String shorten(String text, int max) {

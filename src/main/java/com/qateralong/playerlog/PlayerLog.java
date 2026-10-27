@@ -55,6 +55,7 @@ public class PlayerLog implements ModInitializer {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("playerlog.json");
     private static Config config = new Config();
+    public static MinecraftServer server;
 
     public static class Config {
         public String timeZone = "";
@@ -65,6 +66,12 @@ public class PlayerLog implements ModInitializer {
         public boolean logJoins = true;
         public boolean logDeaths = true;
         public boolean logKills = true;
+        public boolean saveDeathItems = true;
+        public boolean logPickups = true;
+        public boolean logCommands = true;
+        public int commandPermission = 2;
+        public List<String> commandSkip = new ArrayList<>(List.of("login", "l", "log", "register", "reg", "changepassword", "auth", "authguard",
+                "msg", "tell", "w", "teammsg", "tm", "plog", "playerlog"));
         public List<String> logExplosions = new ArrayList<>(List.of("minecraft:tnt", "minecraft:tnt_minecart", "minecraft:end_crystal", "block",
                 "minecraft:wither"));
         public List<String> logSpawns = new ArrayList<>(List.of("minecraft:wither", "minecraft:ender_dragon", "minecraft:warden"));
@@ -80,8 +87,10 @@ public class PlayerLog implements ModInitializer {
     @Override
     public void onInitialize() {
         ServerLifecycleEvents.SERVER_STARTING.register(server -> {
+            PlayerLog.server = server;
             load();
             LogStore.cleanup(config.retentionDays);
+            DeathStore.cleanup(config.retentionDays);
         });
         ServerTickEvents.END_SERVER_TICK.register(EventTracker::tick);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
@@ -225,7 +234,7 @@ public class PlayerLog implements ModInitializer {
                     : BuiltInRegistries.ENTITY_TYPE.getKey(killer.getType()) + (killer.hasCustomName() ? " \"" + name(killer) + "\"" : "");
             LogStore.write("DEATH", victim.getGameProfile().getName(), victim.getUUID(), dimension(victim), victim.blockPosition(),
                     source.getLocalizedDeathMessage(victim).getString(), killerName, weapon(killer), weaponName(killer),
-                    String.valueOf(victim.experienceLevel));
+                    String.valueOf(victim.experienceLevel), Telemetry.takeDeathId(victim.getUUID()));
         }
         if (killer instanceof ServerPlayer player && killer != entity && config.logKills && notable(entity)) {
             String owner = "";
@@ -237,7 +246,10 @@ public class PlayerLog implements ModInitializer {
         }
     }
 
-    private static String profileName(MinecraftServer server, UUID id) {
+    static String profileName(MinecraftServer server, UUID id) {
+        if (id == null) {
+            return "";
+        }
         ServerPlayer online = server.getPlayerList().getPlayer(id);
         if (online != null) {
             return online.getGameProfile().getName();

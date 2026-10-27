@@ -62,7 +62,7 @@ public final class LogStore {
         });
     }
 
-    private static ZoneId zone() {
+    static ZoneId zone() {
         String id = PlayerLog.config().timeZone;
         try {
             return id == null || id.isBlank() ? ZoneId.systemDefault() : ZoneId.of(id);

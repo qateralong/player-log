@@ -8,7 +8,10 @@
     "CompoundContainerAccessor",
     "ServerCommonPacketListenerImplMixin",
     "ServerGamePacketListenerImplMixin",
-    "ServerLevelMixin"
+    "ServerLevelMixin",
+    "CommandsMixin",
+    "ItemEntityMixin",
+    "ServerPlayerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
