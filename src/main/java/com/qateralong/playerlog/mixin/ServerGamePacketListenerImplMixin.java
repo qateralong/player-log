@@ -1,8 +1,11 @@
 package com.qateralong.playerlog.mixin;
 
+import com.qateralong.playerlog.Activity;
 import com.qateralong.playerlog.PlayerLog;
+import java.util.List;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.FilteredText;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -18,5 +21,15 @@ public abstract class ServerGamePacketListenerImplMixin {
     @Inject(method = "onDisconnect", at = @At("HEAD"))
     private void playerlog$leave(DisconnectionDetails details, CallbackInfo ci) {
         PlayerLog.leave(this.player, details.reason().getString());
+    }
+
+    @Inject(method = "updateBookContents", at = @At("HEAD"))
+    private void playerlog$editBook(List<FilteredText> pages, int slot, CallbackInfo ci) {
+        Activity.book(this.player, null, pages);
+    }
+
+    @Inject(method = "signBook", at = @At("HEAD"))
+    private void playerlog$signBook(FilteredText title, List<FilteredText> pages, int slot, CallbackInfo ci) {
+        Activity.book(this.player, title.raw(), pages);
     }
 }

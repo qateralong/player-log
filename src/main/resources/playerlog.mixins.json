@@ -11,7 +11,9 @@
     "ServerLevelMixin",
     "CommandsMixin",
     "ItemEntityMixin",
-    "ServerPlayerMixin"
+    "ServerPlayerMixin",
+    "AnvilMenuMixin",
+    "SignBlockEntityMixin"
   ],
   "injectors": {
     "defaultRequire": 1

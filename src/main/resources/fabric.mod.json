@@ -3,7 +3,7 @@
   "id": "playerlog",
   "version": "${version}",
   "name": "Player Log",
-  "description": "Server-side logging: container takes/puts by coordinates, joins/leaves with client mods, deaths and kills, with in-game search.",
+  "description": "Server-side logging: containers, joins with client mods, deaths, kills, PvP hits, fire and explosives, chat, signs, books, anvil renames, position tracks and shared addresses, with in-game search.",
   "authors": [
     "qateralong"
   ],

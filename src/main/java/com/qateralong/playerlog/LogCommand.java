@@ -30,7 +30,9 @@ import net.minecraft.world.phys.HitResult;
 
 public final class LogCommand {
     private static final int PAGE = 10;
-    private static final List<String> TYPES = List.of("all", "containers", "joins", "deaths", "kills", "events", "pickups", "commands", "restores");
+    private static final List<String> TYPES = List.of("all", "containers", "joins", "deaths", "kills", "pvp", "fire", "chat", "texts", "events", "pickups",
+            "commands", "restores");
+    private static final List<String> TEXTS = List.of("SIGN", "BOOK", "RENAME");
     private static final SuggestionProvider<CommandSourceStack> PLAYERS =
             (context, builder) -> SharedSuggestionProvider.suggest(context.getSource().getOnlinePlayerNames(), builder);
 
@@ -92,6 +94,7 @@ public final class LogCommand {
                         .executes(context -> player(context, "deaths", 1))
                         .then(page().executes(context -> player(context, "deaths", page(context))))))
                 .then(Commands.literal("mods").then(name().executes(LogCommand::mods)))
+                .then(Commands.literal("alts").then(name().executes(LogCommand::alts)))
                 .then(Commands.literal("items").then(Commands.argument("id", StringArgumentType.string()).executes(LogCommand::items)))
                 .then(Commands.literal("return").then(Commands.argument("id", StringArgumentType.string()).executes(LogCommand::giveBack)))
                 .then(Commands.literal("events")
@@ -139,22 +142,7 @@ public final class LogCommand {
             context.getSource().sendFailure(Component.literal("Тип: " + String.join(", ", TYPES)));
             return 0;
         }
-        Predicate<LogStore.Entry> filter = entry -> switch (kind) {
-            case "containers" -> entry.player().equalsIgnoreCase(name) && (entry.type().equals("CONTAINER") || entry.type().equals("BREAK"));
-            case "joins" -> entry.player().equalsIgnoreCase(name) && (entry.type().equals("JOIN") || entry.type().equals("LEAVE"));
-            case "deaths" -> entry.type().equals("DEATH") && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name))
-                    || entry.type().equals("KILL") && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name));
-            case "kills" -> entry.type().equals("KILL") && entry.player().equalsIgnoreCase(name);
-            case "pickups" -> entry.type().equals("PICKUP") && (entry.player().equalsIgnoreCase(name) || entry.data(4).equalsIgnoreCase(name));
-            case "commands" -> entry.type().equals("COMMAND") && entry.player().equalsIgnoreCase(name);
-            case "restores" -> entry.type().equals("RESTORE") && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name));
-            case "events" -> entry.type().equals("EVENT") && (entry.player().equalsIgnoreCase(name) || mentions(entry.data(4), name));
-            default -> entry.player().equalsIgnoreCase(name) || entry.type().equals("DEATH") && entry.data(1).equalsIgnoreCase(name)
-                    || entry.type().equals("PICKUP") && entry.data(4).equalsIgnoreCase(name)
-                    || entry.type().equals("RESTORE") && entry.data(1).equalsIgnoreCase(name)
-                    || entry.type().equals("KILL") && entry.data(1).equalsIgnoreCase(name)
-                    || entry.type().equals("EVENT") && mentions(entry.data(4), name);
-        };
+        Predicate<LogStore.Entry> filter = filter(name, kind);
         String title = switch (kind) {
             case "containers" -> "Сундуки: " + name;
             case "joins" -> "Входы и выходы: " + name;
@@ -164,6 +152,10 @@ public final class LogCommand {
             case "commands" -> "Команды: " + name;
             case "restores" -> "Выдача вещей из снимков: " + name;
             case "events" -> "События рядом с " + name;
+            case "pvp" -> "PvP: " + name;
+            case "fire" -> "Огонь, лава и взрывчатка: " + name;
+            case "chat" -> "Чат: " + name;
+            case "texts" -> "Таблички, книги, переименования: " + name;
             default -> "Журнал: " + name;
         };
         show(context.getSource(), title, "/plog player " + name + " " + kind, filter, page, true);
@@ -181,7 +173,12 @@ public final class LogCommand {
                 case "pickups" -> entry.type().equals("PICKUP") && (entry.player().equalsIgnoreCase(name) || entry.data(4).equalsIgnoreCase(name));
                 case "commands" -> entry.type().equals("COMMAND") && entry.player().equalsIgnoreCase(name);
                 case "restores" -> entry.type().equals("RESTORE") && (entry.player().equalsIgnoreCase(name) || entry.data(1).equalsIgnoreCase(name));
+                case "pvp" -> entry.type().equals("PVP") && (entry.player().equalsIgnoreCase(name) || entry.data(0).equalsIgnoreCase(name));
+                case "fire" -> entry.type().equals("FIRE") && entry.player().equalsIgnoreCase(name);
+                case "chat" -> entry.type().equals("CHAT") && entry.player().equalsIgnoreCase(name);
+                case "texts" -> TEXTS.contains(entry.type()) && entry.player().equalsIgnoreCase(name);
                 default -> entry.player().equalsIgnoreCase(name) || entry.type().equals("DEATH") && entry.data(1).equalsIgnoreCase(name)
+                        || entry.type().equals("PVP") && entry.data(0).equalsIgnoreCase(name)
                         || entry.type().equals("PICKUP") && entry.data(4).equalsIgnoreCase(name)
                         || entry.type().equals("RESTORE") && entry.data(1).equalsIgnoreCase(name)
                         || entry.type().equals("KILL") && entry.data(1).equalsIgnoreCase(name)
@@ -197,6 +194,10 @@ public final class LogCommand {
             case "pickups" -> entry.type().equals("PICKUP");
             case "commands" -> entry.type().equals("COMMAND");
             case "restores" -> entry.type().equals("RESTORE");
+            case "pvp" -> entry.type().equals("PVP");
+            case "fire" -> entry.type().equals("FIRE");
+            case "chat" -> entry.type().equals("CHAT");
+            case "texts" -> TEXTS.contains(entry.type());
             default -> true;
         };
     }
@@ -235,6 +236,30 @@ public final class LogCommand {
                             .append(Component.literal(packs.isEmpty() ? "—" : packs).withStyle(ChatFormatting.WHITE)), false);
                 }, source.getServer());
         return 1;
+    }
+
+    private static int alts(CommandContext<CommandSourceStack> context) {
+        String name = StringArgumentType.getString(context, "name");
+        CommandSourceStack source = context.getSource();
+        int addresses = Addresses.addressCount(name);
+        if (addresses == 0) {
+            source.sendFailure(Component.literal("Адресов " + name + " ещё нет: они записываются при входе"));
+            return 0;
+        }
+        List<Addresses.Account> alts = Addresses.alts(name);
+        source.sendSuccess(() -> Component.literal(name + ": адресов " + addresses + ", других аккаунтов с тех же адресов: " + alts.size())
+                .withStyle(ChatFormatting.GOLD), false);
+        if (alts.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("Совпадений нет").withStyle(ChatFormatting.GRAY), false);
+        }
+        java.time.format.DateTimeFormatter format = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+        for (Addresses.Account account : alts) {
+            String last = java.time.Instant.ofEpochSecond(account.last()).atZone(LogStore.zone()).format(format);
+            source.sendSuccess(() -> Component.empty().append(player(account.name()))
+                    .append(Component.literal(" · был " + last + (account.crowded() ? " · общий адрес (" + account.shared() + " акк.)" : ""))
+                            .withStyle(account.crowded() ? ChatFormatting.DARK_GRAY : ChatFormatting.GRAY)), false);
+        }
+        return alts.size();
     }
 
     private static void show(CommandSourceStack source, String title, String command, Predicate<LogStore.Entry> filter, int page, boolean withPlace) {
@@ -403,6 +428,35 @@ public final class LogCommand {
                         .append(Component.literal(" [игроки]").withStyle(style -> style.withColor(ChatFormatting.AQUA)
                                 .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, players))));
             }
+            case "PVP" -> {
+                line.append(Component.literal("🗡 ").withStyle(ChatFormatting.RED)).append(player(entry.player()))
+                        .append(Component.literal(" ударил ").withStyle(ChatFormatting.RED)).append(player(entry.data(0)))
+                        .append(Component.literal(" ×" + entry.data(2) + " · урон " + entry.data(1) + " · осталось ♥ " + entry.data(5)).withStyle(ChatFormatting.GRAY));
+                if (!entry.data(3).isEmpty()) {
+                    line.append(Component.literal(" · ").withStyle(ChatFormatting.DARK_GRAY)).append(entry.data(3).contains(":") && ResourceLocation.tryParse(entry.data(3)) != null
+                            && BuiltInRegistries.ITEM.containsKey(ResourceLocation.tryParse(entry.data(3))) ? item(entry.data(3), entry.data(4)) : thing(entry.data(3)).withStyle(ChatFormatting.WHITE));
+                }
+            }
+            case "FIRE" -> line.append(Component.literal("🔥 ").withStyle(ChatFormatting.GOLD)).append(player(entry.player()))
+                    .append(Component.literal(" применил ").withStyle(ChatFormatting.GOLD)).append(item(entry.data(0), ""))
+                    .append(Component.literal(" на ").withStyle(ChatFormatting.GRAY)).append(thing(entry.data(1)).withStyle(ChatFormatting.GRAY));
+            case "CHAT" -> line.append(player(entry.player())).append(Component.literal(": ").withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal(entry.data(0)).withStyle(ChatFormatting.WHITE));
+            case "SIGN" -> line.append(player(entry.player())).append(Component.literal(entry.data(1).isEmpty() ? " стёр табличку" : " написал на табличке: ")
+                            .withStyle(ChatFormatting.AQUA))
+                    .append(Component.literal(entry.data(1)).withStyle(ChatFormatting.WHITE))
+                    .append(Component.literal(entry.data(0).equals("back") ? " (обратная сторона)" : "").withStyle(ChatFormatting.GRAY));
+            case "BOOK" -> {
+                boolean signed = entry.data(0).equals("sign");
+                MutableComponent pages = Component.literal(entry.data(3).isEmpty() ? "пусто" : entry.data(3).replace(" ¶ ", "\n\n"));
+                line.append(player(entry.player())).append(Component.literal(signed ? " подписал книгу «" + entry.data(1) + "»" : " изменил книгу")
+                                .withStyle(ChatFormatting.AQUA))
+                        .append(Component.literal(" · стр. " + entry.data(2) + " [текст]").withStyle(style -> style.withColor(ChatFormatting.GRAY)
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, pages))));
+            }
+            case "RENAME" -> line.append(player(entry.player())).append(Component.literal(" переименовал ").withStyle(ChatFormatting.AQUA))
+                    .append(item(entry.data(0), "")).append(Component.literal(entry.data(1).isEmpty() ? "" : " «" + entry.data(1) + "»").withStyle(ChatFormatting.GRAY))
+                    .append(Component.literal(" → «" + entry.data(2) + "»").withStyle(ChatFormatting.WHITE));
             default -> line.append(Component.literal(entry.type() + " " + entry.player() + " " + String.join(" ", Arrays.asList(entry.data()))));
         }
         return line.append(place(entry));

@@ -22,6 +22,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
@@ -75,6 +76,20 @@ public class PlayerLog implements ModInitializer {
                 "msg", "tell", "w", "teammsg", "tm", "plog", "playerlog"));
         public List<String> logExplosions = new ArrayList<>(List.of("minecraft:tnt", "minecraft:tnt_minecart", "minecraft:end_crystal", "block",
                 "minecraft:wither"));
+        public boolean logPvp = true;
+        public int pvpMergeSeconds = 5;
+        public boolean logFire = true;
+        public List<String> fireItems = new ArrayList<>(List.of("minecraft:flint_and_steel", "minecraft:fire_charge", "minecraft:lava_bucket",
+                "minecraft:tnt", "minecraft:end_crystal", "minecraft:tnt_minecart"));
+        public boolean logChat = true;
+        public boolean logSigns = true;
+        public boolean logBooks = true;
+        public boolean logRenames = true;
+        public boolean logTrack = true;
+        public int trackSeconds = 5;
+        public int trackRetentionDays = 30;
+        public boolean logAddresses = true;
+        public int sharedAddressLimit = 6;
         public List<String> logSpawns = new ArrayList<>(List.of("minecraft:wither", "minecraft:ender_dragon", "minecraft:warden"));
         public List<String> killTypes = new ArrayList<>(List.of("minecraft:villager", "minecraft:iron_golem", "minecraft:snow_golem",
                 "minecraft:allay", "minecraft:wandering_trader", "minecraft:horse", "minecraft:donkey", "minecraft:mule", "minecraft:llama",
@@ -92,8 +107,14 @@ public class PlayerLog implements ModInitializer {
             load();
             LogStore.cleanup(config.retentionDays);
             DeathStore.cleanup(config.retentionDays);
+            TrackStore.cleanup(config.trackRetentionDays);
         });
         ServerTickEvents.END_SERVER_TICK.register(EventTracker::tick);
+        ServerTickEvents.END_SERVER_TICK.register(Activity::tick);
+        ServerTickEvents.END_SERVER_TICK.register(TrackStore::tick);
+        ServerLivingEntityEvents.AFTER_DAMAGE.register((entity, source, base, taken, blocked) -> Activity.damage(entity, source, taken));
+        ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> Activity.chat(sender, message.signedContent()));
+        UseBlockCallback.EVENT.register(Activity::useBlock);
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
                 ContainerTracker.flush(player);
@@ -101,7 +122,10 @@ public class PlayerLog implements ModInitializer {
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> LogStore.shutdown());
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> join(handler.player));
-        ServerLivingEntityEvents.AFTER_DEATH.register(PlayerLog::death);
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+            Activity.death(entity);
+            death(entity, source);
+        });
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, blockEntity) -> {
             breakContainer(level, player, pos, state, blockEntity);
             return true;
@@ -158,6 +182,8 @@ public class PlayerLog implements ModInitializer {
 
     private static void join(ServerPlayer player) {
         JOINED.put(player.getUUID(), System.currentTimeMillis());
+        TrackStore.join(player);
+        String address = Addresses.join(player);
         if (!config.logJoins) {
             return;
         }
@@ -178,7 +204,7 @@ public class PlayerLog implements ModInitializer {
             }
         }
         LogStore.write("JOIN", player.getGameProfile().getName(), player.getUUID(), dimension(player), player.blockPosition(),
-                brand, count, modText, packText);
+                brand, count, modText, packText, address);
     }
 
     public static void leave(ServerPlayer player, String reason) {
@@ -186,6 +212,7 @@ public class PlayerLog implements ModInitializer {
             return;
         }
         ContainerTracker.flush(player);
+        TrackStore.leave(player);
         Long since = JOINED.remove(player.getUUID());
         BRANDS.remove(player.getUUID());
         INSPECTORS.remove(player.getUUID());

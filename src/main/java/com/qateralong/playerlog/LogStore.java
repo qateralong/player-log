@@ -100,7 +100,7 @@ public final class LogStore {
                 boolean changed = !writerDay.isEmpty();
                 writerDay = day;
                 if (changed) {
-                    compressOld();
+                    compressOld(DIR, writerDay);
                 }
             }
             writer.write(line);
@@ -142,7 +142,7 @@ public final class LogStore {
         }, worker);
     }
 
-    private static List<String> read(Path file) throws IOException {
+    static List<String> read(Path file) throws IOException {
         if (!file.getFileName().toString().endsWith(".gz")) {
             return Files.readAllLines(file, StandardCharsets.UTF_8);
         }
@@ -152,7 +152,7 @@ public final class LogStore {
         }
     }
 
-    private static boolean isLog(String name) {
+    static boolean isLog(String name) {
         return (name.endsWith(".tsv") || name.endsWith(".tsv.gz")) && name.length() >= 10;
     }
 
@@ -168,16 +168,16 @@ public final class LogStore {
         }
     }
 
-    private static void compressOld() {
+    static void compressOld(Path dir, String activeDay) {
         String keep = LocalDate.now(zone()).minusDays(1).format(DAY);
-        try (Stream<Path> stream = Files.list(DIR)) {
+        try (Stream<Path> stream = Files.list(dir)) {
             for (Path path : stream.toList()) {
                 String name = path.getFileName().toString();
-                if (!name.endsWith(".tsv") || name.length() < 10 || name.substring(0, 10).compareTo(keep) >= 0 || !writerDay.isEmpty() && name.startsWith(writerDay)) {
+                if (!name.endsWith(".tsv") || name.length() < 10 || name.substring(0, 10).compareTo(keep) >= 0 || !activeDay.isEmpty() && name.startsWith(activeDay)) {
                     continue;
                 }
-                Path target = DIR.resolve(name + ".gz");
-                Path tmp = DIR.resolve(name + ".gz.tmp");
+                Path target = dir.resolve(name + ".gz");
+                Path tmp = dir.resolve(name + ".gz.tmp");
                 try (java.io.OutputStream out = new java.util.zip.GZIPOutputStream(Files.newOutputStream(tmp), 65536)) {
                     Files.copy(path, out);
                 }
@@ -197,15 +197,21 @@ public final class LogStore {
     }
 
     public static void cleanup(int retentionDays) {
+        cleanup(DIR, retentionDays, () -> writerDay);
+    }
+
+    static void cleanup(Path dir, int retentionDays, java.util.function.Supplier<String> activeDay) {
         worker.execute(() -> {
-            if (Files.isDirectory(DIR)) {
-                compressOld();
+            if (Files.isDirectory(dir)) {
+                compressOld(dir, activeDay.get());
+            } else {
+                return;
             }
             if (retentionDays <= 0) {
                 return;
             }
             String oldest = LocalDate.now(zone()).minusDays(retentionDays).format(DAY);
-            try (Stream<Path> stream = Files.list(DIR)) {
+            try (Stream<Path> stream = Files.list(dir)) {
                 for (Path path : stream.toList()) {
                     String name = path.getFileName().toString();
                     if (isLog(name) && name.substring(0, 10).compareTo(oldest) < 0) {
@@ -223,6 +229,7 @@ public final class LogStore {
 
     public static void shutdown() {
         worker.execute(() -> {
+            TrackStore.close();
             try {
                 if (writer != null) {
                     writer.close();
